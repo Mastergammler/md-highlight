@@ -1,0 +1,10 @@
+IndentWidth: 4
+
+BreakBeforeBraces: Allman
+AllowShortIfStatementsOnASingleLine: true
+AllowShortLoopsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: None   
+AllowShortCaseLabelsOnASingleLine: true
+PointerAlignment: Left
+IndentCaseLabels: true
+IndentCaseBlocks: false

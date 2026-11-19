@@ -1,0 +1,14 @@
+.build
+compile_commands.json
+.cache
+.ninja_log
+*.txt
+tags
+.vault
+.index*
+.vault
+test*
+*.db
+*.str
+db-tmp/
+testdata/

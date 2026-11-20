@@ -35,4 +35,11 @@ FsRes file_open(str path);
 str file_read_all(str path);
 void file_close(FsRes res);
 
+Tokenizer tok_init(str content);
+Token tok_next(Tokenizer* tok);
+
+StrBuilder strb_init();
+void strb_add(str text, StrBuilder* builder, Arena* arrMem);
+str strb_build(StrBuilder* builder);
+
 #endif

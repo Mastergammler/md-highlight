@@ -1,23 +1,7 @@
+#include "colors.h"
 #include "internal.h"
 
 #define DEBUG false
-
-#define ANSI_RESET str_static("\033[0m")
-// I guess close enough for now
-#define ANSI_HIDDEN_FG str_static("\033[38;5;232m")
-#define ANSI_BOLD str_static("\033[1m")
-#define ANSI_RED str_static("\033[4;38;5;203;48;5;52m")
-#define ANSI_BOLD_RED str_static("\033[1;38;5;217m")
-#define ANSI_YELL str_static("\033[3;38;5;222m")
-#define ANSI_YELL_BG str_static("\033[1;38;5;232;48;5;222m")
-#define ANSI_YELL_HIDE str_static("\033[1;38;5;222;48;5;222m")
-#define ANSI_BLUE str_static("\033[38;5;111m")
-#define ANSI_GREEN str_static("\033[38;5;148m")
-#define ANSI_CARRET str_static("\033[38;5;222;48;5;98m")
-#define ANSI_STRIKE str_static("\033[9m")
-#define ANSI_EOL str_static("\033[80G\033[1K\033[1G")
-#define ANSI_FULL_LINE str_static("\033[K")
-#define ANSI_GRAY_ON_BLACK str_static("\033[38;5;248;48;5;233m")
 
 ProgramArgs read_args(int argc, char** argv)
 {
@@ -43,95 +27,174 @@ str token_type(TokenType type)
         case TOK_EQ: return str_static("EQ");
         case TOK_STAR: return str_static("STAR");
         case TOK_TICK: return str_static("TICK");
+        case TOK_DASH: return str_static("DASH");
+        case TOK_BOPEN: return str_static("BOPEN");
+        case TOK_BCLOSE: return str_static("BCLOSE");
         default: return str_static("<<TODO>>");
     }
 }
 
-void color_reset(Tokenizer* tok, StrBuilder* strb)
+#define ANSI_RESET str_static("\033[0m")
+
+void highlight_reset(Tokenizer* tok, StrBuilder* strb)
 {
     strb_add(ANSI_RESET, strb, &Prog.dyn_mem);
-    tok->color_type = TOK_NONE;
+    tok->highlight = (Highlight){};
+    tok->cur_section = SEC_NONE;
 }
 
 bool matches(int count, TokenType type, Token cur)
 {
-    return cur.type == type && cur.repeat_count == count;
+    return cur.type == type && cur.count == count;
 }
 
-bool is_end_of(TokenType type, Token cur, Tokenizer t)
+bool matches_wla(int count, TokenType curToken, Token hlToken, Token cur)
 {
-    return cur.type == type && t.color_type == type;
+
+    if (DEBUG)
+        str_printc("Check LA match for hl: [%]::[%,%,%,%] == [%]::[%,%,%,%]",
+                   fmt_n(hlToken.type), fmt_n(hlToken.lookahead[0]),
+                   fmt_n(hlToken.lookahead[1]), fmt_n(hlToken.lookahead[2]),
+                   fmt_n(hlToken.lookahead[3]), fmt_n(cur.type),
+                   fmt_n(cur.lookahead[0]), fmt_n(cur.lookahead[1]),
+                   fmt_n(cur.lookahead[2]), fmt_n(cur.lookahead[3]));
+
+    bool startTokenMatch = cur.type == curToken && cur.count == count;
+    bool laMatch = true;
+    for (int i = 0; i < LEN(hlToken.lookahead); i++)
+    {
+        if (hlToken.lookahead[i] == TOK_NONE) break;
+        laMatch = laMatch && (hlToken.lookahead[i] == cur.lookahead[i]);
+    }
+
+    return startTokenMatch && laMatch;
+}
+
+/*
+ * The section advancement really becomes a state machine atm
+ * -> It might even become more complex
+ */
+void section_advance(Tokenizer* tok, Token cur)
+{
+    // if we're already at the last one, we have to wait for an actual reset
+    if (tok->cur_section == SEC_RESET) return;
+
+    if (tok->cur_section == SEC_START &&
+        tok->highlight.terminator.type == cur.type)
+    {
+        tok->cur_section = SEC_END;
+        return;
+    }
+
+    if (tok->cur_section == SEC_TEXT && tok->highlight.nl_termination &&
+        cur.type == TOK_NL)
+    {
+        tok->cur_section = SEC_RESET;
+        return;
+    }
+
+    if (tok->cur_section == SEC_TEXT &&
+        tok->highlight.terminator.type != cur.type)
+        return;
+
+    // this is usually the NL case, because we need to reset before new line
+    // that it works correctly, else it messes up ansi coloring
+    if (tok->cur_section == SEC_TEXT && tok->highlight.term == HL_NONE &&
+        tok->highlight.terminator.type == cur.type)
+    {
+        tok->cur_section = SEC_RESET;
+    }
+    else
+    {
+        tok->cur_section++;
+    }
+}
+
+void add_section_color(Tokenizer* tok, StrBuilder* strb)
+{
+    switch (tok->cur_section)
+    {
+        case SEC_NONE: break;
+        case SEC_START:
+            strb_add(COLOR_TABLE[tok->highlight.start], strb, &Prog.dyn_mem);
+            break;
+        case SEC_TEXT:
+            strb_add(COLOR_TABLE[tok->highlight.text], strb, &Prog.dyn_mem);
+            break;
+        case SEC_END:
+            strb_add(COLOR_TABLE[tok->highlight.term], strb, &Prog.dyn_mem);
+            break;
+        case SEC_RESET: highlight_reset(tok, strb); break;
+        default:
+            str_printc("ERR: Section was: %", fmt_n(tok->cur_section));
+            break;
+    }
 }
 
 void color_set(Tokenizer* tok, StrBuilder* strb, Token cur)
 {
-    if (cur.type == TOK_EOF || cur.type == TOK_NL)
+    if (cur.type == TOK_EOF)
     {
-        color_reset(tok, strb);
+        highlight_reset(tok, strb);
     }
-    // skip cases
-    else if (cur.type == TOK_TEXT || cur.type == TOK_SPACE)
+    else if (tok->cur_section > SEC_NONE)
     {
-        // strb_add(ANSI_HIDDEN_FG, strb, &Prog.dyn_mem);
-        //  do nothing
-    }
-    else if (cur.type == tok->color_type)
-    {
-        // prev type == current type => means end condition
-        // -> Just skip special cases before!
-        tok->reset_after = true;
+        section_advance(tok, cur);
+        add_section_color(tok, strb);
     }
 
-    // ------------- matching list starting ----------------
-    // => actually turn this into a lookup of a semtable
+    /*
+     * check if a new section is starting
+     * This is disconnected from the if above because we might just
+     * have ended a token, and starting the new one at the same time
+     */
+    if (tok->cur_section == SEC_NONE)
+    {
+        for (int i = 0; i < LEN(HIGHLIGHTS); i++)
+        {
+            Highlight hl = HIGHLIGHTS[i];
+            if (hl.trigger.lookahead[0] > TOK_NONE)
+            {
 
-    else if (matches(1, TOK_STAR, cur))
-    {
-        strb_add(ANSI_HIDDEN_FG, strb, &Prog.dyn_mem);
-        tok->before_end_col = ANSI_HIDDEN_FG;
-        tok->color_type = TOK_STAR;
-        tok->after_token_switch = true;
-        tok->after_token_col = ANSI_YELL;
+                if (matches_wla(hl.trigger.count, hl.trigger.type, hl.trigger,
+                                cur))
+                {
+                    tok->highlight = hl;
+                    tok->cur_section = SEC_START;
+                    break;
+                }
+            }
+            else if (matches(hl.trigger.count, hl.trigger.type, cur))
+            {
+                tok->highlight = hl;
+                tok->cur_section = SEC_START;
+                break;
+            }
+        }
     }
-    else if (matches(2, TOK_STAR, cur))
+
+    add_section_color(tok, strb);
+
+    /*
+       break; case TOK_CARRET: strb_add(ANSI_CARRET, &strb, &Prog.dyn_mem);
+                    strb_add(ANSI_EOL, &strb, &Prog.dyn_mem);
+                    break;
+
+    //    else if (matches_wla(1, TOK_HASH, TOK_SPACE, cur))
     {
-        strb_add(ANSI_HIDDEN_FG, strb, &Prog.dyn_mem);
-        tok->before_end_col = ANSI_HIDDEN_FG;
-        tok->color_type = TOK_STAR;
-        tok->after_token_switch = true;
-        tok->after_token_col = ANSI_BOLD_RED;
+        strb_add(ANSI_RED_BG_UNDER, strb, &Prog.dyn_mem);
+        strb_add(ANSI_FULL_LINE, strb, &Prog.dyn_mem);
+        tok->color_type = TOK_HASH;
     }
-    else if (matches(1, TOK_TICK, cur))
-    {
-        strb_add(ANSI_HIDDEN_FG, strb, &Prog.dyn_mem);
-        tok->before_end_col = ANSI_HIDDEN_FG;
-        tok->color_type = TOK_TICK;
-        tok->after_token_switch = true;
-        tok->after_token_col = ANSI_GRAY_ON_BLACK;
-    }
-    else if (matches(2, TOK_EQ, cur))
-    {
-        strb_add(ANSI_YELL_HIDE, strb, &Prog.dyn_mem);
-        tok->before_end_col = ANSI_YELL_HIDE;
-        tok->color_type = TOK_EQ;
-        tok->after_token_switch = true;
-        tok->after_token_col = ANSI_YELL_BG;
-    }
-    else if (matches(2, TOK_BRAK_S, cur))
-    {
-        strb_add(ANSI_BLUE, strb, &Prog.dyn_mem);
-        tok->before_end_col = ANSI_BLUE;
-        tok->color_type = TOK_BRAK_S;
-        tok->after_token_switch = true;
-        tok->after_token_col = ANSI_BLUE;
-    }
+    */
 }
 
 // STFO: Can i just color the symbols with the bg color or something to hide
 //  them, without actually having to remove them?
 int main(int argc, char** argv)
 {
-    init_program(8196);
+    init_program(32 * 4048);
+    init_color_table();
     ProgramArgs args = read_args(argc, argv);
 
     if (NOT(args.valid))
@@ -141,70 +204,50 @@ int main(int argc, char** argv)
     }
 
     str content = file_read_all(args.source_file);
-    Tokenizer tok = tok_init(content);
 
+    Timer timer = {};
+    timer_start(&timer);
+
+    Tokenizer tok = tok_init(content);
     StrBuilder strb = strb_init();
 
-    Token t = {};
+    TokenPosition curTpos = {};
     int iterations = 0;
-    int maxIterations = 80;
 
-    while (t.type != TOK_EOF && iterations++ < maxIterations)
+    while (curTpos.token.type != TOK_EOF)
     {
-        t = tok_next(&tok);
-        str dbgText = t.type != TOK_NL
-                          ? str_sub(tok.text, t.start_pos, t.start_pos + t.len)
-                          : str_static("<nl>");
-        str text = str_sub(tok.text, t.start_pos, t.start_pos + t.len);
+        curTpos = tok_next(&tok);
+        str text = str_sub(tok.text, curTpos.start_pos,
+                           curTpos.start_pos + curTpos.len);
 
-        // TODO: implement specific reset events per section
-        // -> every section has their own one
-
-        color_set(&tok, &strb, t);
-
-        switch (t.type)
-        {
-            case TOK_HASH:
-                strb_add(ANSI_RED, &strb, &Prog.dyn_mem);
-                strb_add(ANSI_FULL_LINE, &strb, &Prog.dyn_mem);
-                break;
-            case TOK_QUOTE: strb_add(ANSI_GREEN, &strb, &Prog.dyn_mem); break;
-            case TOK_STRIKE: strb_add(ANSI_STRIKE, &strb, &Prog.dyn_mem); break;
-            case TOK_CARRET:
-                strb_add(ANSI_CARRET, &strb, &Prog.dyn_mem);
-                strb_add(ANSI_EOL, &strb, &Prog.dyn_mem);
-                break;
-            default:
-                // do nothing, no color change
-                break;
-        }
-
-        if (tok.reset_after)
-        {
-            strb_add(tok.before_end_col, &strb, &Prog.dyn_mem);
-        }
-
+        color_set(&tok, &strb, curTpos.token);
         strb_add(text, &strb, &Prog.dyn_mem);
 
-        if (tok.reset_after)
-        {
-            color_reset(&tok, &strb);
-            tok.reset_after = false;
-            tok.before_end_col = (str){};
-        }
-        else if (tok.after_token_switch)
-        {
-            strb_add(tok.after_token_col, &strb, &Prog.dyn_mem);
-            tok.after_token_switch = false;
-            tok.after_token_col = (str){};
-        }
+        tok.prev_token = curTpos;
 
         if (DEBUG)
-            str_printc("Token: [%|%] %", fmt_s(token_type(t.type)),
-                       fmt_n(t.repeat_count), fmt_s(dbgText));
+        {
+            str dbgText = curTpos.token.type != TOK_NL
+                              ? str_sub(tok.text, curTpos.start_pos,
+                                        curTpos.start_pos + curTpos.len)
+                              : str_static("<nl>");
+            str_printc("Token: [%|%] '%' :: LA [%,%,%,%]",
+                       fmt_s(token_type(curTpos.token.type)),
+                       fmt_n(curTpos.token.count), fmt_s(dbgText),
+                       fmt_n(curTpos.token.lookahead[0]),
+                       fmt_n(curTpos.token.lookahead[1]),
+                       fmt_n(curTpos.token.lookahead[2]),
+                       fmt_n(curTpos.token.lookahead[3]));
+        }
     }
 
+    float elapsed = timer_elapsed_ms(&timer);
+
+    // FIXME: CRASH - when the text contains a % it tries to find a formatter
+    //  -> But there is ofc none there, how can I fix this?
     str_print(strb_build(&strb));
+    str_printc("| % ms Parsing | File size: %", fmt_f(elapsed, 3),
+               fmt_n(content.len));
 
     return 0;
 }

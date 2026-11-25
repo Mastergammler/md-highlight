@@ -24,21 +24,77 @@ typedef enum
     TOK_NL,
     TOK_STAR,
     TOK_EQ,
-    TOK_BRAK_S,
-    TOK_BRAK_E,
+    TOK_BOPEN,
+    TOK_BCLOSE,
     TOK_STRIKE,
     TOK_CARRET,
     TOK_QUOTE,
     TOK_TICK,
+    TOK_DASH,
+    TOK_DOT,
+    TOK_NUM
 } TokenType;
+
+typedef enum
+{
+    HL_NONE,
+    HL_BLACK_ON_YELL,
+    HL_BLUE,
+    HL_GRAY,
+    HL_DARK_GRAY,
+    HL_GRAY_ON_BLACK,
+    HL_GRAY_ON_BLACK_HIDE,
+    HL_GREEN,
+    HL_DARK_GREEN,
+    HL_LGREEN_ON_DGREEN,
+    HL_HIDE,
+    HL_HIDE_STRONG,
+    HL_LIGHT_RED,
+    HL_LIGHTER_RED,
+    HL_LIGHTEST_RED,
+    HL_RED_BOLD,
+    HL_RED,
+    HL_STRIKE,
+    HL_YELL_ON_PINK,
+    HL_RED_ON_PINK,
+    HL_RED_ON_RED_UNDER,
+    HL_RED_ON_RED,
+    HL_RED_UNDER,
+    HL_YELL,
+    HL_YELL_BOLD,
+    HL_LIGHT_ON_PINK,
+    HL_PURPLE,
+    HL_DPURPLE,
+    HL_YELL_ON_YELL,
+    HL_count
+} HighlightColor;
+
+typedef enum
+{
+    SEC_NONE,
+    /* = trigger */
+    SEC_START,
+    SEC_TEXT,
+    /* = terminator */
+    SEC_END,
+    /* = after */
+    SEC_RESET
+
+} HighlightSection;
 
 typedef struct
 {
     TokenType type;
+    int count;
+    TokenType lookahead[4];
+} Token;
+
+typedef struct
+{
+    Token token;
     int start_pos;
     int len;
-    int repeat_count;
-} Token;
+} TokenPosition;
 
 typedef struct
 {
@@ -48,31 +104,33 @@ typedef struct
 
 typedef struct
 {
+    bool active;
+    /* special case for additionally terminate on new line as well */
+    bool nl_termination;
+
+    Token trigger;
+    Token terminator;
+
+    HighlightColor start;
+    HighlightColor text;
+    HighlightColor term;
+
+} Highlight;
+
+typedef struct
+{
     str text;
     int pos;
 
-    /*
-     * Text or EOF = NONE
-     * type that determines the current color
-     */
-    TokenType color_type;
-    bool reset_after;
-
-    // after text end -> till clear
-    str before_end_col;
-
-    // text to add after the token
-    // -> To color token & text differently
-    // & to hide text etc
-    bool after_token_switch;
-    str after_token_col;
-
+    Highlight highlight;
+    HighlightSection cur_section;
+    TokenPosition prev_token;
 } Tokenizer;
 
 typedef struct
 {
     bool matched;
-    Token token;
+    TokenPosition token_pos;
 } MatchResult;
 
 typedef struct

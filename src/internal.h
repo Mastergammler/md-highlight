@@ -4,10 +4,12 @@
 #include "types.h"
 
 #include <alloc/module.h>
+#include <measure/module.h>
 #include <string/macros.h>
 #include <string/module.h>
 
 #define NOT(expr) !(expr)
+#define LEN(arr) (sizeof(arr) / sizeof(arr[0]))
 
 typedef enum
 {
@@ -36,7 +38,7 @@ str file_read_all(str path);
 void file_close(FsRes res);
 
 Tokenizer tok_init(str content);
-Token tok_next(Tokenizer* tok);
+TokenPosition tok_next(Tokenizer* tok);
 
 StrBuilder strb_init();
 void strb_add(str text, StrBuilder* builder, Arena* arrMem);

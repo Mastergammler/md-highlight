@@ -5,4 +5,5 @@
 
 #include "file.c"
 #include "init.c"
+#include "stringbuilder.c"
 #include "tokenizer.c"
